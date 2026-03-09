@@ -151,19 +151,22 @@ async function startServer() {
       return res.status(400).json({ error: "Entity name is required" });
     }
 
-    // API Key Detection: Try user provided key first, then GEMINI_API_KEY, then fallback to API_KEY
-    let apiKey = userApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY;
-    
-    // Clean up placeholder values
-    const placeholders = ["MY_GEMINI_API_KEY", "YOUR_API_KEY_HERE", "REPLACE_WITH_YOUR_KEY"];
-    if (apiKey && placeholders.includes(apiKey.trim())) {
-      apiKey = undefined;
-    }
+    // API Key Detection Logic
+    const getValidKey = (key?: string) => {
+      if (!key || key.trim() === "") return undefined;
+      const placeholders = ["MY_GEMINI_API_KEY", "YOUR_API_KEY_HERE", "REPLACE_WITH_YOUR_KEY", "API_KEY"];
+      if (placeholders.includes(key.trim())) return undefined;
+      return key.trim();
+    };
 
-    if (!apiKey || apiKey.trim() === "") {
-      console.error("CRITICAL: Gemini API Key is missing or invalid in environment.");
+    let apiKey = getValidKey(userApiKey) || 
+                 getValidKey(process.env.GEMINI_API_KEY) || 
+                 getValidKey(process.env.API_KEY);
+
+    if (!apiKey) {
+      console.error("CRITICAL: Gemini API Key is missing or invalid.");
       return res.status(500).json({ 
-        error: "Gemini API Key is not configured. Please go to Settings > Secrets and add 'GEMINI_API_KEY' or use the in-app Settings tab." 
+        error: "Gemini API Key is not configured. Please go to the 'Settings' tab in this app and paste your key, or add it to AI Studio Secrets as 'GEMINI_API_KEY'." 
       });
     }
 

@@ -248,6 +248,10 @@ export default function App() {
 
       if (!response.ok) {
         const errorData = await response.json();
+        if (errorData.error && errorData.error.includes("API Key")) {
+          setActiveTab('settings');
+          throw new Error("API Key required. Please enter it in the Settings tab.");
+        }
         throw new Error(errorData.error || 'Research failed');
       }
 
@@ -307,9 +311,9 @@ export default function App() {
             )} />
             {configStatus.gemini ? "System Online" : "System Offline (Key Missing)"}
           </div>
-          {!configStatus.gemini && (
+          {!configStatus.gemini && !settings.geminiApiKey && (
             <button 
-              onClick={() => setError("API Key Missing. Please go to Settings > Secrets and add 'GEMINI_API_KEY'.")}
+              onClick={() => setActiveTab('settings')}
               className="px-3 py-1 border border-red-500 text-red-500 text-[10px] font-mono uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors"
             >
               Setup Key
