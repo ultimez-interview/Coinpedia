@@ -105,9 +105,25 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // CORS for QD Dashboard cross-origin access
+  const QD_DASHBOARD_URL = process.env.QD_DASHBOARD_URL || "";
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const origin = req.headers.origin;
+    if (origin && (origin === QD_DASHBOARD_URL || QD_DASHBOARD_URL === "*")) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
+    }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   app.use(express.json());
 
-  // Simple API Key for CI3 Integration
+  // API Key for QD Dashboard Integration
   const API_KEY_CI3 = process.env.INTERNAL_API_KEY || "chainintel_secret_123";
 
   const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -219,6 +235,70 @@ async function startServer() {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // ── QD Dashboard API (authenticated, versioned) ──────────────────────────
+
+  // Health check for the QD Dashboard to verify connectivity
+  app.get("/api/v1/health", authMiddleware, (req, res) => {
+    const hasGeminiKey = !!(process.env.GEMINI_API_KEY || process.env.API_KEY);
+    const hasBigQueryKey = !!process.env.BIGQUERY_PROJECT_ID;
+    res.json({
+      status: "ok",
+      version: "v1",
+      config: { gemini: hasGeminiKey, bigquery: hasBigQueryKey },
+    });
+  });
+
+  // Research endpoint for the QD Dashboard
+  app.post("/api/v1/research", authMiddleware, async (req, res) => {
+    const { entityName, dataSources, apiKey: userApiKey } = req.body;
+
+    if (!entityName) {
+      return res.status(400).json({ error: "Entity name is required" });
+    }
+
+    const getValidKey = (key?: string) => {
+      if (!key || key.trim() === "") return undefined;
+      const placeholders = ["MY_GEMINI_API_KEY", "YOUR_API_KEY_HERE", "REPLACE_WITH_YOUR_KEY", "API_KEY"];
+      if (placeholders.includes(key.trim())) return undefined;
+      return key.trim();
+    };
+
+    const apiKey =
+      getValidKey(userApiKey) ||
+      getValidKey(process.env.GEMINI_API_KEY) ||
+      getValidKey(process.env.API_KEY);
+
+    if (!apiKey) {
+      return res.status(500).json({ error: "Gemini API Key is not configured on the server." });
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const model = "gemini-3.1-pro-preview";
+      const prompt = `Research Entity: ${entityName}\n\nData Sources: ${dataSources || "Use Google Search grounding."}`;
+
+      const result = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      res.json({
+        fullText: result.text || "",
+        usage: result.usageMetadata,
+        groundingMetadata: result.candidates?.[0]?.groundingMetadata,
+      });
+    } catch (error: any) {
+      console.error("QD Dashboard Research API Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
